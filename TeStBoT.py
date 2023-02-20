@@ -94,7 +94,7 @@ async def activity_saver(message):
                 track = member.activity.title
                 artist = member.activity.artist
                 query = f'{track} {artist}'
-                bpm = get_bpm(query)
+                bpm = get_bpm2(query)
                 activity_info = {"user_id": member.id, "user_name": member.name, "song_title": track, "song_artist": artist, "bpm": bpm}
                 spotify_activity_list.append(activity_info)
                 # wait for a short time before checking the next user
@@ -105,7 +105,7 @@ async def activity_saver(message):
                     break
     # do something with the final spotify_activity_list
 
-def get_bpm(query):
+def get_bpm2(query):
     #query = f"track:{title} artist:{artist}"
     results = sp.search(q=query, type="track", limit=1)
 
