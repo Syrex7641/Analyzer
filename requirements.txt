@@ -1,2 +1,2 @@
 discord.py==1.7.3
-spotipy==2.18.0
+spotipy==2.22.1
