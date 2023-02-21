@@ -7,9 +7,9 @@ import tracemalloc
 
 client = discord.Client(intents=discord.Intents.all())
 
-TOKEN = "MTA3NTQ0MTMyMzQ0NTg2NjU4OA.G265SF.CkPz6HpEKtzBMCEFlEFen8gHPIE_8VnBmr59dM"
-client_id = "40a977e419844aadab020e6fd49da439"
-client_secret = "4249888ce8f94872a9c5b9b4991bc3f1"
+TOKEN = "DiscordToken"
+client_id = "ClientIDSpotify"
+client_secret = "ClientSECRETSpotify"
 is_thread_running = False
 task = None
 
