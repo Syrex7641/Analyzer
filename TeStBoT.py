@@ -2,6 +2,8 @@ import discord
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import asyncio
+import threading
+import tracemalloc
 
 client = discord.Client(intents=discord.Intents.all())
 
@@ -15,9 +17,11 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, 
 async def on_ready():
     print('Logged in as {0.user}'.format(client))
     await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name='!info in BLM'))
-
+    
 @client.event
 async def on_message(message):
+    is_thread_running = False 
+    thread = threading.Thread(target=start_activity_saver, args=(message,))
     if message.content.startswith('!similar'):
         query = message.content[9:]
         response = get_similar_tracks(query)
@@ -35,7 +39,19 @@ async def on_message(message):
             response = "You are not currently listening to Spotify!"
             await message.channel.send(response)
     elif message.content.startswith('!scan') and any(role.name == 'Business-member' for role in message.author.roles):
-        activity_saver(message)
+        # Erstelle Task für die asynchrone Funktion
+        #Speicherstatistik starten
+        is_thread_running = True
+        thread.start()
+        await message.channel.send('Scan gestartet.')
+    elif message.content.startswith('!stopp') and any(role.name == 'Business-member' for role in message.author.roles):
+        if is_thread_running == True:
+            #TODO Funktioniert nihct ganz Bearebeiten!!
+            thread.stop()
+            is_thread_running = False
+            await message.channel.send('Scann gestoppt')
+        else:
+            await message.channel.send('Scann läuft nicht.')
     elif message.content.startswith('!bpm'):
             activity = message.author.activity
             if activity and activity.type == discord.ActivityType.listening and activity.title:
@@ -59,6 +75,8 @@ async def on_message(message):
         help_embed.add_field(name="!info", value="Get a list of available commands.", inline=False)
         await message.channel.send(embed=help_embed)
         
+def start_activity_saver(message):
+    asyncio.run(activity_saver(message))
 
 def get_similar_tracks(query):
     result = sp.search(q=query, type='track')
@@ -82,30 +100,32 @@ def format_similar_tracks_response(query, similar_tracks):
 async def activity_saver(message):
     # continuously update list of user's Spotify activities
     spotify_activity_list = []
-    while True:
-        # check for stop command
-        if message.content.startswith('!stop'):
-            await message.channel.send('Scannen beendet.')
-            print(spotify_activity_list)
-            break
-        # update activity list for each user on the server
-        for member in message.guild.members:
-            if member.activity and member.activity.type == discord.ActivityType.listening:
+    # check for stop command
+    #if message.content.startswith('!stop'):
+    #    await message.channel.send('Scannen beendet.')
+    #    print(spotify_activity_list)
+    #    break
+    # update activity list for each user on the server
+    for member in message.guild.members:
+        if member.activity and member.activity.type == discord.ActivityType.listening:
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"Speichernutzung: {current / 10**6}MB; Spitzenwert: {peak / 10**6}MB.")
+            if member.activity.type == discord.ActivityType.listening and member.activity.name == 'Spotify':
                 track = member.activity.title
                 artist = member.activity.artist
                 query = f'{track} {artist}'
-                bpm = get_bpm2(query)
+                bpm = await get_bpm2(query)
                 activity_info = {"user_id": member.id, "user_name": member.name, "song_title": track, "song_artist": artist, "bpm": bpm}
                 spotify_activity_list.append(activity_info)
-                # wait for a short time before checking the next user
+            # wait for a short time before checking the next user
                 await asyncio.sleep(2)
-                if message.content.startswith('!stop'):
-                    await message.channel.send('Scannen beendet.')
-                    print(spotify_activity_list)
-                    break
-    # do something with the final spotify_activity_list
+            #if message.content.startswith('!stop'):
+            #    await message.channel.send('Scannen beendet.')
+            #    print(spotify_activity_list)
+            #    break
+# do something with the final spotify_activity_list
 
-def get_bpm2(query):
+async def get_bpm2(query):
     #query = f"track:{title} artist:{artist}"
     results = sp.search(q=query, type="track", limit=1)
 
