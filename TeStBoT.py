@@ -2,12 +2,16 @@ import discord
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import asyncio
+import threading
+import tracemalloc
 
 client = discord.Client(intents=discord.Intents.all())
 
-TOKEN = "Discord_Token"
-client_id = "Spotify_client_id"
-client_secret = "Spotify_client_secret"
+TOKEN = "DiscordToken"
+client_id = "ClientIDSpotify"
+client_secret = "ClientSECRETSpotify"
+is_thread_running = False
+task = None
 
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret))
 
@@ -15,7 +19,8 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, 
 async def on_ready():
     print('Logged in as {0.user}'.format(client))
     await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name='!info in BLM'))
-
+    
+    
 @client.event
 async def on_message(message):
     if message.content.startswith('!similar'):
@@ -26,7 +31,9 @@ async def on_message(message):
     elif message.content.startswith('!go'):
         activity = message.author.activity
         if activity and activity.type == discord.ActivityType.listening and activity.title:
-            query = activity.title
+            track = activity.title
+            artist = activity.artist
+            query = f'{track} - {artist}'
             response = get_similar_tracks(query)
             embed = discord.Embed(title="Spotify Recommendations", description=response, color=0x1DB954)
             await message.channel.send(embed=embed)
@@ -34,15 +41,22 @@ async def on_message(message):
             # keine passende Aktivität gefunden
             response = "You are not currently listening to Spotify!"
             await message.channel.send(response)
+
     elif message.content.startswith('!scan') and any(role.name == 'Business-member' for role in message.author.roles):
-        activity_saver(message)
+
+        await start_activity(message,1)   #(message, Start[1] / Stop[2])
+
+    elif message.content.startswith('!stopp') and any(role.name == 'Business-member' for role in message.author.roles):
+
+        await start_activity(message,2)   #(message, Start[1] / Stop[2])
+
     elif message.content.startswith('!bpm'):
             activity = message.author.activity
             if activity and activity.type == discord.ActivityType.listening and activity.title:
                 track = activity.title
                 artist = activity.artist
                 query = f'{track} - {artist}'
-                response = get_bpm(query)
+                response = get_bpm2(query)
                 formated = f'Song: {track} \r Artist(s): {artist} \r BPM: {response}'
                 embed = discord.Embed(title=query, description=formated, color=0x1DB954)
                 await message.channel.send(embed=embed)
@@ -59,6 +73,10 @@ async def on_message(message):
         help_embed.add_field(name="!info", value="Get a list of available commands.", inline=False)
         await message.channel.send(embed=help_embed)
         
+def start_activity_saver(message):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(activity_saver(message))
 
 def get_similar_tracks(query):
     result = sp.search(q=query, type='track')
@@ -80,30 +98,27 @@ def format_similar_tracks_response(query, similar_tracks):
     return response
 
 async def activity_saver(message):
-    # continuously update list of user's Spotify activities
-    spotify_activity_list = []
-    while True:
-        # check for stop command
-        if message.content.startswith('!stop'):
-            await message.channel.send('Scannen beendet.')
-            print(spotify_activity_list)
-            break
-        # update activity list for each user on the server
+    while True:  
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"Speichernutzung: {current / 10**6}MB; Spitzenwert: {peak / 10**6}MB.")
+        print(f"Momentan: {current}  Höchstwert: {peak}")
+        await asyncio.sleep(2)  # continuously update list of user's Spotify activities
+        spotify_activity_list = []
         for member in message.guild.members:
-            if member.activity and member.activity.type == discord.ActivityType.listening:
-                track = member.activity.title
-                artist = member.activity.artist
-                query = f'{track} {artist}'
-                bpm = get_bpm2(query)
-                activity_info = {"user_id": member.id, "user_name": member.name, "song_title": track, "song_artist": artist, "bpm": bpm}
-                spotify_activity_list.append(activity_info)
+            if member.activity and member.activity.type == discord.ActivityType.listening and member.activity.name == 'Spotify':
+
+                if member.activity.type == discord.ActivityType.listening:
+                    track = member.activity.title
+                    artist = member.activity.artist
+                    query = f'{track} {artist}'
+                    bpm = get_bpm2(query)
+                    activity_info = {"user_id": member.id, "user_name": member.name, "song_title": track, "song_artist": artist, "bpm": bpm}
+                    spotify_activity_list.append(activity_info)
                 # wait for a short time before checking the next user
-                await asyncio.sleep(2)
-                if message.content.startswith('!stop'):
-                    await message.channel.send('Scannen beendet.')
-                    print(spotify_activity_list)
-                    break
-    # do something with the final spotify_activity_list
+                    await asyncio.sleep(1)
+                print (spotify_activity_list)
+                
+# do something with the final spotify_activity_list
 
 def get_bpm2(query):
     #query = f"track:{title} artist:{artist}"
@@ -126,5 +141,29 @@ def get_bpm(track_name, artist_name):
         if track_features and 'tempo' in track_features:
             return round(track_features['tempo'])
     return "N/A"
+
+async def start_activity(message, state):
+    global is_thread_running
+    global task
+
+    if state == 1:
+        if is_thread_running == False:
+            task = asyncio.create_task(activity_saver(message))
+            await asyncio.sleep(3)
+            await message.channel.send('Scann gestartet.')
+            is_thread_running = True
+        else:
+            await message.channel.send('Scann läuft...')
+
+    elif state == 2:
+        if is_thread_running == True:
+            task.cancel()  # Abbrechen der Task
+            await message.channel.send('Scann gestoppt')
+            is_thread_running = False
+        else:
+            await message.channel.send('Scann läuft nicht!')
+
+    return is_thread_running
+
 
 client.run(TOKEN)
