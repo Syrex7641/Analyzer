@@ -1,17 +1,28 @@
 import discord
+from discord.ext import commands
+#from discord_components import DiscordComponents, Button, ButtonStyle
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import asyncio
 import threading
 import tracemalloc
+import openai
 
 client = discord.Client(intents=discord.Intents.all())
 
 TOKEN = "DiscordToken"
 client_id = "ClientIDSpotify"
 client_secret = "ClientSECRETSpotify"
+OpenAI_api_key = "OpenAiToken"
 is_thread_running = False
 task = None
+
+preprompt = {'Persönlichkeit': 'Inhalt1',
+             'Produktmanager': 'Inhalt2',
+             'Testuser': 'Yeah',
+             'philosoph': 'Inhalt3',
+             'Germanist': 'Inhalt3',
+             'Mathematiker': 'Inhalt4'}
 
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret))
 
@@ -20,7 +31,6 @@ async def on_ready():
     print('Logged in as {0.user}'.format(client))
     await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name='!info in BLM'))
     
-    
 @client.event
 async def on_message(message):
     if message.content.startswith('!similar'):
@@ -28,6 +38,13 @@ async def on_message(message):
         response = get_similar_tracks(query)
         embed = discord.Embed(title="Spotify Recommendations", description=response, color=0x1DB954)
         await message.channel.send(embed=embed)
+    elif message.content.startswith('!gpt'):
+        #selected_prompt = await change_persona(message)
+        pre_prompt = await change_persona(message)
+        await message.channel.send('Schreibe mir deinen prompt :D')
+        query = await message.content
+       # query = message.content[5:]
+        get_openai_response(pre_prompt, query)
     elif message.content.startswith('!go'):
         activity = message.author.activity
         if activity and activity.type == discord.ActivityType.listening and activity.title:
@@ -74,11 +91,29 @@ async def on_message(message):
         await message.channel.send(embed=help_embed)
         
 def start_activity_saver(message):
+    """
+    This function starts an asyncio event loop that continuously retrieves and saves the Spotify listening activities of all members in a Discord server.
+
+    Args:
+        message (discord.Message): The message object that triggered the function.
+
+    Returns:
+        None.
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(activity_saver(message))
 
 def get_similar_tracks(query):
+    """
+    Retrieves a list of similar tracks to the queried track and formats the response.
+
+    Args:
+        query (str): A string representing the track name and/or artist name to search for.
+
+    Returns:
+        str: A formatted string containing similar tracks to the queried track.
+    """
     result = sp.search(q=query, type='track')
     if result['tracks']['total'] > 0:
         track_id = result['tracks']['items'][0]['id']
@@ -87,7 +122,151 @@ def get_similar_tracks(query):
     else:
         return "No tracks found matching your query."
 
+async def change_persona(message):
+    '''
+    Diese Funktion soll einen Embeded Dropdown in einem Text channel erstellen.
+    Die Auswahl hat verschiedene "Persönlickeiten" die im Backend bestimmte Persönlichkeits Prompts ausführt.
+    
+    '''
+    options = [discord.SelectOption(label=k, value=k) for k in preprompt.keys()]
+    select = discord.ui.Select(options=options, placeholder='Wähle ein Prompt aus', min_values=1, max_values=1)
+
+    view = discord.ui.View()
+    view.add_item(select)
+
+    embed = discord.Embed(title='Wähle ein Prompt aus', description='Bitte wähle ein Prompt aus der Liste aus:')
+
+    msg = await message.channel.send(embed=embed, view=view)
+    try:
+        interaction = await client.wait_for('select_option', timeout=30.0, check=lambda i: i.message.id == msg.id)
+        selected_prompt = preprompt[interaction.values[0]]
+        await message.channel.send(selected_prompt)
+    except asyncio.TimeoutError:
+        await message.channel.send('Timeout')
+
+
+def get_token_length(prompt):
+    """
+    Diese Funktion berechnet die Tokenlänge der Eingabe.
+
+    Args:
+        prompt (str): Die Eingabe, deren Tokenlänge berechnet werden soll.
+
+    Returns:
+        int: Die Tokenlänge der Eingabe.
+    """
+    openai.api_key = OpenAI_api_key # Fügen Sie hier Ihren OpenAI-API-Schlüssel ein.
+    token_count = openai.Completion.create(
+        engine="davinci",
+        prompt=prompt,
+        max_tokens=0,
+        n=1,
+        stop=None,
+        temperature=0
+    ).choices[0].text.count('\n') + 1
+    return token_count
+
+def insert_value_at_token_length(prompt, token_length, value, lst):
+    """
+    Diese Funktion fügt einen Wert in eine Liste ein, wenn eine bestimmte Tokenlänge erreicht wird.
+
+    Args:
+        prompt (str): Die Eingabe, deren Tokenlänge überwacht werden soll.
+        token_length (int): Die Tokenlänge, bei der der Wert in die Liste eingefügt werden soll.
+        value (any): Der Wert, der in die Liste eingefügt werden soll.
+        lst (list): Die Liste, in die der Wert eingefügt werden soll.
+
+    Returns:
+        list: Die aktualisierte Liste.
+    """
+    length = get_token_length(prompt)
+    if length == token_length:
+        lst.append(value)
+    return lst
+
+def get_prompt_length(prompt):
+    """
+    Diese Funktion berechnet die Länge der Eingabe in Token.
+
+    Args:
+        prompt (str): Die Eingabe, deren Tokenlänge berechnet werden soll.
+
+    Returns:
+        int: Die Tokenlänge der Eingabe.
+    """
+    openai.api_key = OpenAI_api_key # Fügen Sie hier Ihren OpenAI-API-Schlüssel ein.
+    token_count = openai.Completion.create(
+        engine="davinci",
+        prompt=prompt,
+        max_tokens=0,
+        n=1,
+        stop=None,
+        temperature=0
+    ).choices[0].text.count('\n') + 1
+    return token_count
+
+def split_prompt_by_length(prompt, max_length):
+    """
+    Diese Funktion teilt eine Eingabe in mehrere Teile auf, falls sie eine bestimmte Tokenlänge überschreitet.
+
+    Args:
+        prompt (str): Die Eingabe, die aufgeteilt werden soll.
+        max_length (int): Die maximale Tokenlänge pro Teil.
+
+    Returns:
+        list: Eine Liste der aufgeteilten Eingabe.
+    """
+    token_count = get_prompt_length(prompt)
+    if token_count <= max_length:
+        return [prompt]
+    else:
+        split_prompts = []
+        prompt_parts = prompt.split()
+        while len(prompt_parts) > 0:
+            split_prompt = ' '.join(prompt_parts[:max_length])
+            split_prompts.append(split_prompt)
+            prompt_parts = prompt_parts[max_length:]
+        return split_prompts
+
+def get_openai_response(querytype, query):
+    """
+    Diese Funktion gibt die OpenAI-Antwort basierend auf einer Eingabe zurück.
+
+    Args:
+        querytype (str): Der Typ der Anfrage.
+        query (str): Die Eingabe für die Anfrage.
+
+    Returns:
+        str: Die OpenAI-Antwort.
+    """
+    openai.api_key = OpenAI_api_key
+    max_tokens = 1024
+    prompt_parts = split_prompt_by_length(f"{querytype} {query}", max_tokens)
+    completions = []
+    for part in prompt_parts:
+        completion = openai.Completion.create(
+            engine="davinci",
+            prompt=part,
+            max_tokens=max_tokens,
+            n=1,
+            stop=None,
+            temperature=0.5
+        ).choices[0].text.strip()
+        completions.append(completion)
+    response = ' '.join(completions)
+    return response
+
 def format_similar_tracks_response(query, similar_tracks):
+    """
+    Diese Funktion gibt eine formatierte Antwort auf eine Anfrage ähnlicher Songs zurück.
+
+    Args:
+        query (str): Die Suchanfrage, die die ähnlichen Songs ausgelöst hat.
+        similar_tracks (dict): Eine Spotify-API-Antwort, die eine Liste von ähnlichen Tracks enthält.
+
+    Returns:
+        str: Eine formatierte Antwort, die die ähnlichen Songs auflistet.
+    """
     response = "Similar tracks to " + query + ":\n"
     for i, track in enumerate(similar_tracks['tracks']):
         track_name = track['name']
@@ -98,6 +277,15 @@ def format_similar_tracks_response(query, similar_tracks):
     return response
 
 async def activity_saver(message):
+    """
+    Diese asynchrone Funktion verfolgt die Spotify-Aktivitäten von Benutzern in einer Discord-Gilde und speichert sie in einer Liste.
+
+    Args:
+        message (discord.Message): Die Nachricht, die den Befehl zum Starten der Überwachung enthält.
+
+    Returns:
+        None: Diese Funktion gibt nichts zurück.
+    """
     while True:  
         current, peak = tracemalloc.get_traced_memory()
         print(f"Speichernutzung: {current / 10**6}MB; Spitzenwert: {peak / 10**6}MB.")
@@ -121,6 +309,15 @@ async def activity_saver(message):
 # do something with the final spotify_activity_list
 
 def get_bpm2(query):
+    """
+    Diese Funktion ruft die Beats pro Minute (BPM) für einen gegebenen Song-Titel und Künstler mithilfe der Spotify API ab.
+
+    Args:
+        query (str): Die Suchanfrage, die den Titel und Künstler des Songs enthält.
+
+    Returns:
+        Union[int, None]: Wenn die BPM abgerufen werden konnten, gibt die Funktion die BPM als Integer zurück. Andernfalls gibt die Funktion None zurück.
+    """
     #query = f"track:{title} artist:{artist}"
     results = sp.search(q=query, type="track", limit=1)
 
@@ -133,6 +330,16 @@ def get_bpm2(query):
             return bpm
         
 def get_bpm(track_name, artist_name):
+    """
+    Diese Funktion ruft die Beats pro Minute (BPM) für einen gegebenen Song-Titel und Künstler mithilfe der Spotify API ab.
+
+    Args:
+        track_name (str): Der Titel des Songs.
+        artist_name (str): Der Name des Künstlers.
+
+    Returns:
+        Union[int, str]: Wenn die BPM abgerufen werden konnten, gibt die Funktion die BPM als Integer zurück. Andernfalls gibt die Funktion "N/A" zurück.
+    """
     query = f"{track_name} {artist_name}"
     result = sp.search(q=query, type='track')
     if result['tracks']['total'] > 0:
@@ -143,6 +350,16 @@ def get_bpm(track_name, artist_name):
     return "N/A"
 
 async def start_activity(message, state):
+    """
+    This function is used to start or stop the activity_saver task that constantly checks and logs user's Spotify activities in a Discord server.
+
+    Parameters:
+    - message: A Discord message object that triggers the function.
+    - state: An integer representing the state of the activity_saver task. 1 for starting the task, 2 for stopping it.
+
+    Returns:
+    - A boolean value indicating whether the activity_saver task is running or not.
+    """
     global is_thread_running
     global task
 
