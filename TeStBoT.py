@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 #from discord_components import DiscordComponents, Button, ButtonStyle
+from discord.ui import Select, View
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import asyncio
@@ -14,15 +15,16 @@ TOKEN = "DiscordToken"
 client_id = "ClientIDSpotify"
 client_secret = "ClientSECRETSpotify"
 OpenAI_api_key = "OpenAiToken"
+
 is_thread_running = False
 task = None
 
-preprompt = {'Persönlichkeit': 'Inhalt1',
-             'Produktmanager': 'Inhalt2',
-             'Testuser': 'Yeah',
-             'philosoph': 'Inhalt3',
-             'Germanist': 'Inhalt3',
-             'Mathematiker': 'Inhalt4'}
+preprompt = {'Title1': 'Beschreibung1',
+             'Title2': 'Beschreibung2',
+             'Title3': 'Beschreibung3',
+             'Title4': 'Beschreibung4',
+             'Title5': 'Beschreibung5',
+             'Title6': 'Beschreibung6'}
 
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret))
 
@@ -40,11 +42,11 @@ async def on_message(message):
         await message.channel.send(embed=embed)
     elif message.content.startswith('!gpt'):
         #selected_prompt = await change_persona(message)
-        pre_prompt = await change_persona(message)
-        await message.channel.send('Schreibe mir deinen prompt :D')
-        query = await message.content
+        await change_persona2(message)
+        #await message.channel.send('Schreibe mir deinen prompt :D')
+        #query = await message.content
        # query = message.content[5:]
-        get_openai_response(pre_prompt, query)
+        #get_openai_response(pre_prompt, query)
     elif message.content.startswith('!go'):
         activity = message.author.activity
         if activity and activity.type == discord.ActivityType.listening and activity.title:
@@ -121,6 +123,32 @@ def get_similar_tracks(query):
         return format_similar_tracks_response(query, similar_tracks)
     else:
         return "No tracks found matching your query."
+
+
+async def change_persona2(message):
+    options = [
+        discord.SelectOption(label='Beschreibung', value='Titel'),
+        discord.SelectOption(label='Option 2', value='option2'),
+        discord.SelectOption(label='Option 3', value='option3'),
+    ]
+
+    select = discord.ui.Select(
+        placeholder='Wähle eine Option aus', 
+        options=options
+    )
+
+    async def on_select(interaction):
+        #get_openai_response(select.values[0])
+        #Start loop for conversation
+        await interaction.response.send_message(f'Du hast {select.values[0]} ausgewählt.')
+
+    select.callback = on_select
+
+    view = discord.ui.View()
+    view.add_item(select)
+
+    await message.channel.send('Wähle eine Option:', view=view)
+
 
 async def change_persona(message):
     '''
